@@ -20,6 +20,10 @@ A desktop Grand Exchange tracker for Old School RuneScape, built with Python and
 | ![Analytics](docs/screenshots/screenshot_dark_analytics.png) | ![Suggestions](docs/screenshots/screenshot_suggestions.png) |
 
 ## Install and run (Windows)
+**Easiest: download the .exe.** Grab `OSRS-GE-Tracker-v0.7.0-windows.exe` from the [latest release](https://github.com/Phantomphreak001/osrs-ge-tracker/releases/latest) and double-click it. No Python needed. The exe is unsigned, so Windows SmartScreen may warn: click **More info → Run anyway**.
+
+**Or run from source:**
+
 1. Install [Python 3.10+](https://www.python.org/downloads/) (Tkinter is included with the standard installer).
 2. Download or clone this repository, then in its folder run:
    ```
