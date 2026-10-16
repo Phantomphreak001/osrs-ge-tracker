@@ -1,0 +1,3 @@
+# Tkinter ships with the standard Python installer on Windows (no pip install needed).
+matplotlib
+tzdata
