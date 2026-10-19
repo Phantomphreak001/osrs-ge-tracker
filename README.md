@@ -11,6 +11,7 @@ A desktop Grand Exchange tracker for Old School RuneScape, built with Python and
 - **Analytics**: market movers, watchlist summary, deep-dive charts (SMAs, spread band), timing/ROI by hour of day.
 - **Suggestions**: quick flips, overnight holds and longer-term ideas.
 - **Flip log**: record your trades and see realised after-tax profit.
+- **Open flips**: log a buy now and enter the sell price when it sells (partial sales supported), with live estimated profit after tax.
 - **Light and dark themes.**
 
 | Item view | Flip finder |
@@ -41,7 +42,7 @@ margin = high − tax(high) − low; ROI = margin / low. GE tax is 2% rounded do
 
 ## Data storage
 Everything is stored locally in `%APPDATA%\ge-tracker\` on Windows (`~/.local/share/ge-tracker/` elsewhere):
-`watchlist.json` (watchlist, alerts, settings), `flips.json` (flip log) and cached item data/icons.
+`watchlist.json` (watchlist, alerts, settings), `flips.json` (flip log), `open_flips.json` (open flips: bought, not sold yet) and cached item data/icons.
 Nothing is uploaded anywhere.
 
 ## Data source

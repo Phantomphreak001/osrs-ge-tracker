@@ -453,30 +453,147 @@ def flip_profit(qty, buy, sell, name=None):
     return (sell - ge_tax(sell, name) - buy) * qty
 
 
+def held(seconds):
+    """How long an open flip has been held: 45m, 3h 12m, 2d 4h."""
+    s = max(0, int(seconds or 0))
+    if s < 3600: return f"{s // 60}m"
+    if s < 86400: return f"{s // 3600}h {s % 3600 // 60}m"
+    return f"{s // 86400}d {s % 86400 // 3600}h"
+
+
+def _parse_json_file(path):
+    """(ok, data). ok=False means the file exists but could not be parsed."""
+    try:
+        with open(path, encoding="utf-8") as fh: return True, json.load(fh)
+    except FileNotFoundError:
+        return True, None
+    except Exception:
+        return False, None
+
+
+def _keep_copy(path, suffix):
+    """Copy a data file aside once (never overwrites an earlier copy). Failures are ignored."""
+    try:
+        bak = path + suffix
+        if os.path.exists(path) and not os.path.exists(bak):
+            import shutil; shutil.copy2(path, bak)
+        return bak
+    except Exception:
+        return None
+
+
+OPEN_FLIPS_VERSION = 1
+
+
 class FlipLog:
-    """Realized flips in flips.json in the app data folder."""
+    """Realized flips in flips.json (a plain JSON list - same format as v0.1-v0.7, so older versions
+    can still read it) plus open flips (bought, not sold yet) in open_flips.json next to it (v0.8)."""
     def __init__(self, data_dir=None):
-        self.path = os.path.join(data_dir or app_dir(), "flips.json")
-        self.flips = []
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, encoding="utf-8") as fh: self.flips = json.load(fh)
+        d = data_dir or app_dir()
+        self.path = os.path.join(d, "flips.json")
+        self.open_path = os.path.join(d, "open_flips.json")
+        self.flips, self.open = [], []
+        migrate = False
+        ok, raw = _parse_json_file(self.path)
+        if not ok:
+            # Corrupt file: keep it aside so nothing is lost when we save again.
+            _keep_copy(self.path, time.strftime(".corrupt-%Y%m%d-%H%M%S.bak"))
+        elif isinstance(raw, list):
+            self.flips = [f for f in raw if isinstance(f, dict)]
+        elif isinstance(raw, dict):           # tolerate a {"flips": [...], "open": [...]} style file
+            self.flips = [f for f in raw.get("flips") or [] if isinstance(f, dict)]
+            self.open = [self._norm_open(o) for o in raw.get("open") or [] if isinstance(o, dict)]
+            _keep_copy(self.path, ".pre-v0.8.bak")
+            migrate = True
+        ok, raw = _parse_json_file(self.open_path)
+        if not ok:
+            _keep_copy(self.open_path, time.strftime(".corrupt-%Y%m%d-%H%M%S.bak"))
+        elif raw is not None:
+            lst = raw.get("open") if isinstance(raw, dict) else raw
+            self.open += [self._norm_open(o) for o in lst or [] if isinstance(o, dict)]
+        if migrate:      # write open flips first, then flips.json back as the plain list older versions read
+            try: self.save_open(); self.save()
             except Exception: pass
 
-    def save(self):
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh: json.dump(self.flips, fh, indent=1)
-        os.replace(tmp, self.path)
+    @staticmethod
+    def _norm_open(o):
+        o = dict(o)
+        o.setdefault("oid", os.urandom(6).hex()); o.setdefault("ts", time.time()); o.setdefault("note", "")
+        o["qty"], o["buy"] = int(o.get("qty") or 0), int(o.get("buy") or 0)
+        return o
 
-    def add(self, item_id, name, qty, buy, sell, ts=None):
+    @staticmethod
+    def _write(path, data):
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh: json.dump(data, fh, indent=1)
+        os.replace(tmp, path)
+
+    def save(self):
+        self._write(self.path, self.flips)
+
+    def save_open(self):
+        self._write(self.open_path, {"version": OPEN_FLIPS_VERSION, "open": self.open})
+
+    def add(self, item_id, name, qty, buy, sell, ts=None, **extra):
         qty, buy, sell = int(qty), int(buy), int(sell)
         if qty <= 0 or buy < 0 or sell < 0: raise ValueError("qty must be > 0, prices >= 0")
         f = {"ts": ts or time.time(), "id": item_id, "name": name, "qty": qty, "buy": buy, "sell": sell,
              "tax": ge_tax(sell, name) * qty, "profit": flip_profit(qty, buy, sell, name)}
+        f.update({k: v for k, v in extra.items() if v not in (None, "")})
         self.flips.append(f); self.save(); return f
 
     def delete(self, idx):
         del self.flips[idx]; self.save()
+
+    # ---------- open flips (v0.8): log the buy now, the sale later ----------
+    def get_open(self, oid):
+        for o in self.open:
+            if o["oid"] == oid: return o
+        raise KeyError(oid)
+
+    def add_open(self, item_id, name, qty, buy, note="", ts=None):
+        qty, buy = int(qty), int(buy)
+        if qty <= 0 or buy < 0: raise ValueError("qty must be > 0, price >= 0")
+        o = {"oid": os.urandom(6).hex(), "ts": ts or time.time(), "id": item_id, "name": name,
+             "qty": qty, "buy": buy, "note": (note or "").strip()}
+        self.open.append(o); self.save_open(); return o
+
+    def edit_open(self, oid, **kw):
+        o = self.get_open(oid); new = dict(o)
+        for k in ("id", "name", "note", "ts"):
+            if k in kw and kw[k] is not None: new[k] = kw[k].strip() if k == "note" else kw[k]
+        if kw.get("qty") is not None: new["qty"] = int(kw["qty"])
+        if kw.get("buy") is not None: new["buy"] = int(kw["buy"])
+        if new["qty"] <= 0 or new["buy"] < 0: raise ValueError("qty must be > 0, price >= 0")
+        o.update(new); self.save_open(); return o
+
+    def delete_open(self, oid):
+        self.open.remove(self.get_open(oid)); self.save_open()
+
+    def sell_open(self, oid, sell, qty=None, ts=None):
+        """Sell all (qty=None) or part of an open flip. The sold part becomes a normal completed flip
+        (same fields as add(), plus bought_ts/note); any remainder stays open. Returns the completed flip."""
+        o = self.get_open(oid)
+        qty = o["qty"] if qty in (None, "") else int(qty)
+        sell = int(sell)
+        if qty <= 0 or qty > o["qty"]: raise ValueError(f"quantity sold must be between 1 and {o['qty']}")
+        if sell < 0: raise ValueError("price must be >= 0")
+        f = self.add(o["id"], o["name"], qty, o["buy"], sell, ts=ts, bought_ts=o["ts"], note=o.get("note"))
+        # completed flip is saved first: a crash between the two writes can only duplicate, never lose
+        if qty == o["qty"]: self.open.remove(o)
+        else: o["qty"] -= qty
+        self.save_open(); return f
+
+    def open_rows(self, latest=None, now=None):
+        """Open flips with live-price estimates: cost, held, live (instant-buy 'high'), est profit after tax."""
+        now = now or time.time(); latest = latest or {}; out = []
+        for o in self.open:
+            live = (latest.get(str(o["id"])) or {}).get("high")
+            out.append(dict(o, cost=o["qty"] * o["buy"], held_s=now - o["ts"], held=held(now - o["ts"]), live=live,
+                            est=flip_profit(o["qty"], o["buy"], live, o["name"]) if live else None))
+        return out
+
+    def open_cost(self): return sum(o["qty"] * o["buy"] for o in self.open)
 
     def total(self): return sum(f["profit"] for f in self.flips)
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0
+- Open flips: log a buy now ("Log a buy (sell later)" on My Flips, the item page, or right-click → "Log a buy…"),
+  then press "Sold…" when it sells. Supports partial sales (the rest stays open), edit and delete.
+- Open flips list shows total cost, time held, the live sell price and estimated profit after GE tax.
+- Open flips are saved in `open_flips.json`; `flips.json` keeps its existing format so older versions can still read it.
+- A corrupt `flips.json` is now copied aside (`.corrupt-<time>.bak`) instead of being overwritten.
+
 ## 0.7.0
 - UX pass: new Home tab, item view, flip finder with advanced options, tips and offline state.
 - Settings file migration (`settings_version: 2`, automatic backup of the old file).

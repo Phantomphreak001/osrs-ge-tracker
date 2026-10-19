@@ -427,6 +427,104 @@ class Suggest(unittest.TestCase):
         self.assertEqual(len(rows), 1); self.assertTrue(rows[0]["cost"] <= 3_000_000)
 
 
+class OpenFlips(unittest.TestCase):
+    """v0.8: log a buy now (open flip), enter the sale later."""
+    def test_open_to_sold(self):
+        import json, os
+        d = tempfile.mkdtemp(); fl = c.FlipLog(d)
+        o = fl.add_open(4151, "Abyssal whip", 2, 1_500_000, note="  dip buy ", ts=1_700_000_000)
+        self.assertEqual(o["note"], "dip buy"); self.assertEqual(len(fl.open), 1); self.assertEqual(fl.flips, [])
+        f = fl.sell_open(o["oid"], 1_600_000, ts=1_700_003_600)
+        self.assertEqual(fl.open, [])
+        # same fields/format as a normal logged flip (+ bought_ts/note), so stats include it
+        ref = c.FlipLog(tempfile.mkdtemp()).add(4151, "Abyssal whip", 2, 1_500_000, 1_600_000, ts=1_700_003_600)
+        for k in ref: self.assertEqual(f[k], ref[k], k)
+        self.assertEqual(f["profit"], (1_600_000 - 32_000 - 1_500_000) * 2); self.assertEqual(f["tax"], 64_000)
+        self.assertEqual(f["bought_ts"], 1_700_000_000); self.assertEqual(f["note"], "dip buy")
+        r = c.FlipLog(d)
+        self.assertEqual(r.total(), 136_000); self.assertEqual(r.by_item()["Abyssal whip"]["n"], 1); self.assertEqual(r.open, [])
+        with open(os.path.join(d, "flips.json")) as fh: self.assertIsInstance(json.load(fh), list)   # old format kept
+        with self.assertRaises(KeyError): r.sell_open(o["oid"], 1)
+
+    def test_partial_sell(self):
+        d = tempfile.mkdtemp(); fl = c.FlipLog(d)
+        o = fl.add_open(2, "Cannonball", 1000, 200)
+        f1 = fl.sell_open(o["oid"], 210, 400)
+        self.assertEqual(f1["qty"], 400); self.assertEqual(f1["profit"], (210 - 4 - 200) * 400)
+        self.assertEqual(fl.get_open(o["oid"])["qty"], 600)
+        r = c.FlipLog(d); self.assertEqual(r.open[0]["qty"], 600); self.assertEqual(len(r.flips), 1)   # persisted
+        for bad in (0, -1, 601):
+            with self.assertRaises(ValueError): r.sell_open(o["oid"], 210, bad)
+        self.assertEqual(r.open[0]["qty"], 600); self.assertEqual(len(r.flips), 1)                       # unchanged
+        r.sell_open(o["oid"], 190)                                                                        # rest, at a loss
+        self.assertEqual(r.open, []); self.assertEqual(r.flips[-1]["qty"], 600)
+        self.assertEqual(r.total(), 6 * 400 + (190 - 3 - 200) * 600)
+        self.assertEqual(len(c.FlipLog(d).flips), 2)
+
+    def test_tax_math_estimates(self):
+        fl = c.FlipLog(tempfile.mkdtemp()); now = 1_700_000_000
+        rows_in = [(1, "Cheap", 100, 40), (2, "Mid", 10, 1000), (3, "Huge", 1, 300_000_000), (13190, "Old school bond", 1, 9_000_000),
+                   (5, "NoPrice", 3, 10)]
+        oids = [fl.add_open(i, n, q, b, ts=now - 3 * 3600 - 120)["oid"] for i, n, q, b in rows_in]
+        latest = {"1": {"high": 49, "low": 45}, "2": {"high": 1099, "low": 1000}, "3": {"high": 310_000_000},
+                  "13190": {"high": 9_100_000}}
+        rows = {r["name"]: r for r in fl.open_rows(latest, now=now)}
+        self.assertEqual(rows["Cheap"]["est"], (49 - 40) * 100)                       # under 50gp: no tax
+        self.assertEqual(rows["Mid"]["est"], (1099 - 21 - 1000) * 10)                 # 2% of 1099 = 21.98 -> 21 (floored)
+        self.assertEqual(rows["Huge"]["est"], 310_000_000 - 5_000_000 - 300_000_000)  # cap 5m per item
+        self.assertEqual(rows["Old school bond"]["est"], 100_000)                    # bonds exempt
+        self.assertIsNone(rows["NoPrice"]["est"]); self.assertIsNone(rows["NoPrice"]["live"])
+        self.assertEqual(rows["Mid"]["cost"], 10_000); self.assertEqual(rows["Mid"]["held"], "3h 2m")
+        self.assertEqual(fl.open_cost(), 4000 + 10_000 + 300_000_000 + 9_000_000 + 30)
+        self.assertEqual(c.held(59), "0m"); self.assertEqual(c.held(2 * 86400 + 4 * 3600 + 5), "2d 4h")
+        f = fl.sell_open(oids[1], 1099); self.assertEqual(f["tax"], 210)               # sold flip uses same tax function
+
+    def test_edit_delete_and_validation(self):
+        d = tempfile.mkdtemp(); fl = c.FlipLog(d)
+        o = fl.add_open(560, "Death rune", 100, 190)
+        with self.assertRaises(ValueError): fl.add_open(560, "Death rune", 0, 190)
+        with self.assertRaises(ValueError): fl.edit_open(o["oid"], qty=0)
+        self.assertEqual(c.FlipLog(d).open[0]["qty"], 100)
+        fl.edit_open(o["oid"], qty=150, buy=185, note="fixed", id=561, name="Nature rune")
+        r = c.FlipLog(d).open[0]
+        self.assertEqual((r["qty"], r["buy"], r["note"], r["id"], r["name"]), (150, 185, "fixed", 561, "Nature rune"))
+        self.assertEqual(r["oid"], o["oid"])
+        fl.delete_open(o["oid"]); self.assertEqual(c.FlipLog(d).open, []); self.assertEqual(c.FlipLog(d).flips, [])
+
+    def test_persistence_and_migration(self):
+        import json, os
+        d = tempfile.mkdtemp(); fp = os.path.join(d, "flips.json")
+        legacy = [{"ts": 1792180972.3985984, "id": 8882, "name": "Bone bolts", "qty": 11435, "buy": 6, "sell": 8, "tax": 0,
+                   "profit": 22870}]
+        with open(fp, "w") as fh: json.dump(legacy, fh)
+        fl = c.FlipLog(d)                                           # v0.7 file loads untouched
+        self.assertEqual(fl.flips, legacy); self.assertEqual(fl.open, [])
+        with open(fp) as fh: self.assertEqual(json.load(fh), legacy)   # not rewritten just by loading
+        o = fl.add_open(4151, "Abyssal whip", 1, 1_500_000)
+        with open(fp) as fh: self.assertEqual(json.load(fh), legacy)   # adding an open flip doesn't touch history
+        with open(os.path.join(d, "open_flips.json")) as fh: raw = json.load(fh)
+        self.assertEqual(raw["version"], 1); self.assertEqual(raw["open"][0]["oid"], o["oid"])
+        r = c.FlipLog(d); self.assertEqual(r.flips, legacy); self.assertEqual(r.open[0]["name"], "Abyssal whip")
+        r.sell_open(o["oid"], 1_600_000)
+        with open(fp) as fh: on_disk = json.load(fh)
+        self.assertIsInstance(on_disk, list); self.assertEqual(on_disk[0], legacy[0]); self.assertEqual(len(on_disk), 2)
+        # dict-style file ({"flips": [...], "open": [...]}) is migrated: backup kept, flips.json back to a plain list
+        d2 = tempfile.mkdtemp(); fp2 = os.path.join(d2, "flips.json")
+        with open(fp2, "w") as fh: json.dump({"flips": legacy, "open": [{"id": 2, "name": "Cannonball", "qty": 5, "buy": 200}]}, fh)
+        m = c.FlipLog(d2)
+        self.assertEqual(m.flips, legacy); self.assertEqual(m.open[0]["qty"], 5); self.assertTrue(m.open[0]["oid"])
+        self.assertTrue(os.path.exists(fp2 + ".pre-v0.8.bak"))
+        with open(fp2) as fh: self.assertEqual(json.load(fh), legacy)
+        self.assertEqual(c.FlipLog(d2).open[0]["oid"], m.open[0]["oid"])
+        # corrupt files are kept aside, never silently lost
+        d3 = tempfile.mkdtemp()
+        with open(os.path.join(d3, "flips.json"), "w") as fh: fh.write("[{not json")
+        with open(os.path.join(d3, "open_flips.json"), "w") as fh: fh.write("{oops")
+        x = c.FlipLog(d3); self.assertEqual((x.flips, x.open), ([], []))
+        baks = [f for f in os.listdir(d3) if ".corrupt-" in f]
+        self.assertEqual(len(baks), 2)
+        with open(os.path.join(d3, [b for b in baks if b.startswith("flips.json")][0])) as fh: self.assertEqual(fh.read(), "[{not json")
+
 class Live(unittest.TestCase):
     def test_live(self):
         def out(*a):
@@ -465,5 +563,6 @@ if __name__ == "__main__":
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Theme))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Suggest))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(UX))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(OpenFlips))
     if live: suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Live))
     sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())

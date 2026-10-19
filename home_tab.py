@@ -110,7 +110,9 @@ class HomePage(ttk.Frame):
         td, n = self.app.flog.today()
         self.today.config(text=core.signed_gp(td) + " gp" if n else "0 gp",
                           style="CardBigPos.TLabel" if td > 0 else "CardBigNeg.TLabel" if td < 0 else "CardBig.TLabel")
-        self.today_sub.config(text=f"{n} flips today · all time {core.signed_gp(self.app.flog.total())}")
+        no = len(getattr(self.app.flog, "open", []))
+        self.today_sub.config(text=f"{n} flips today · all time {core.signed_gp(self.app.flog.total())}"
+                                   + (f" · {no} open" if no else ""))
 
     def refresh_alerts(self):
         d = self.app.store.data

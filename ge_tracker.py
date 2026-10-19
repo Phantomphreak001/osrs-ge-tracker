@@ -1,4 +1,4 @@
-"""OSRS Grand Exchange Tracker (v0.7) - Tkinter desktop app. Run: python ge_tracker.py
+"""OSRS Grand Exchange Tracker (v0.8) - Tkinter desktop app. Run: python ge_tracker.py
 Pages: Home · Watchlist · Flip Finder · Item · Market · My Flips (+ optional scrolling best-flips ticker)."""
 import sys, threading, time, datetime, tkinter as tk
 from tkinter import ttk, messagebox
@@ -10,7 +10,7 @@ from analytics_tab import WatchlistPage, ItemPage, MarketPage, FlipsPage
 from suggestions_tab import FlipFinderPage
 from home_tab import HomePage
 
-VERSION = "0.7"
+VERSION = "0.8"
 TABS = (("home", "🏠 Home"), ("watchlist", "★ Watchlist"), ("finder", "💰 Flip Finder"), ("item", "🔎 Item"),
         ("market", "📈 Market"), ("flips", "📒 My Flips"))
 REFRESH_S = 60
@@ -172,6 +172,7 @@ class App:
         else: m.add_command(label="Add to watchlist", command=lambda: self.add_watch(iid))
         m.add_command(label="Set price alert…", command=lambda: self.alert_dialog(iid))
         m.add_command(label="Log a flip…", command=lambda: self.log_flip(iid))
+        m.add_command(label="Log a buy (sell later)…", command=lambda: self.log_buy(iid))
         m.add_separator()
         m.add_command(label="Copy name", command=lambda: (self.root.clipboard_clear(),
                                                          self.root.clipboard_append(self.items[iid]["name"])))
@@ -195,6 +196,9 @@ class App:
 
     def log_flip(self, iid, qty=None, buy=None, sell=None):
         self.flips_page.prefill(iid, qty, buy, sell); self.goto("flips")
+
+    def log_buy(self, iid, qty=None, buy=None):
+        self.flips_page.prefill_buy(iid, qty, buy); self.goto("flips")
 
     def alert_dialog(self, iid):
         if not iid: messagebox.showinfo("Price alert", "Select an item first.", parent=self.root); return
@@ -488,6 +492,7 @@ class App:
         if not self.items: return
         self._update_ticker()
         self.watch_page.refresh(); self.home.refresh(); self.finder.refresh_now(); self.item_page.update_prices()
+        self.flips_page.render_open()
         if self.current() == "market": self.market.refresh()
 
     def _check_alerts(self):

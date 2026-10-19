@@ -286,8 +286,10 @@ class ItemPage(ttk.Frame):
         self.btn_watch = ttk.Button(hd, text="☆ Add to watchlist", command=self._toggle_watch, width=20)
         self.btn_flip = ttk.Button(hd, text="Log a flip…", command=lambda: self.iid and app.log_flip(self.iid))
         self.btn_alert = ttk.Button(hd, text="Set alert…", command=lambda: self.iid and app.alert_dialog(self.iid))
-        for b in (self.btn_flip, self.btn_alert, self.btn_watch): b.pack(side="right", padx=2)
+        self.btn_buy = ttk.Button(hd, text="Log a buy…", command=lambda: self.iid and app.log_buy(self.iid))
+        for b in (self.btn_flip, self.btn_buy, self.btn_alert, self.btn_watch): b.pack(side="right", padx=2)
         tip(self.btn_flip, "Record a flip you did with this item (My Flips tracks your profit).", app)
+        tip(self.btn_buy, "Bought some but not sold yet? Log the buy now and enter the sell price later (My Flips → Open flips).", app)
         self.search = SearchBox(hd, app, lambda iid: app.open_item(iid), width=26, placeholder="open another item…")
         self.search.pack(side="right", padx=10)
         # fact cards
@@ -651,6 +653,7 @@ class FlipsPage(ttk.Frame):
         ttk.Button(form, text="Save flip", style="Accent.TButton", command=self._log_flip).pack(side="left", padx=8)
         self.f_preview = ttk.Label(form, text="", style="Card.TLabel"); self.f_preview.pack(side="left", padx=8)
         for v in (self.f_qty, self.f_buy, self.f_sell): v.trace_add("write", lambda *_: self._preview())
+        self._build_open()
         body = ttk.Frame(self); body.pack(fill="both", expand=True)
         cols = [("when", "When", 120, str), ("name", "Item", 170, str), ("qty", "How many", 70, gp),
                 ("buy", "Bought at", 85, gp), ("sell", "Sold at", 85, gp), ("tax", "GE tax", 75, short_gp),
@@ -677,6 +680,189 @@ class FlipsPage(ttk.Frame):
         s = self.f_item.get().strip().lower()
         if len(s) >= 2 and getattr(self.app, "names", None):
             self.f_combo["values"] = [n for n in self.app.names if s in n.lower()][:30]
+
+    # ---------- open flips (v0.8): log the buy now, enter the sale when it sells ----------
+    def _item_values(self, combo, var):
+        s = var.get().strip().lower()
+        if len(s) >= 2 and getattr(self.app, "names", None):
+            starts = [n for n in self.app.names if n.lower().startswith(s)]
+            combo["values"] = (starts + [n for n in self.app.names if s in n.lower() and not n.lower().startswith(s)])[:30]
+
+    def _live(self, iid, key):
+        return (self.app.latest.get(str(iid)) or {}).get(key) if iid is not None else None
+
+    def _build_open(self):
+        app = self.app
+        form = ttk.Frame(self, style="Card.TFrame", padding=8); form.pack(fill="x", pady=(0, 6))
+        l = ttk.Label(form, text="Log a buy (sell later):", style="CardTitle.TLabel"); l.pack(side="left", padx=(0, 6))
+        tip(l, "Bought something that hasn't sold yet? Log the buy now - it goes into 'Open flips' below. "
+               "When it sells, select it and press 'Sold…' to enter the sell price.", app)
+        self.o_item, self.o_qty, self.o_buy, self.o_note = (tk.StringVar() for _ in range(4))
+        self._o_auto = None
+        for lbl, var, w, g in (("Item", self.o_item, 28, None), ("How many", self.o_qty, 8, "qty"),
+                               ("Bought at (each)", self.o_buy, 11, "Pre-filled with the current Buy at price - change it "
+                                                                   "to what you actually paid. You can type 1.2k or 3m."),
+                               ("Note", self.o_note, 16, "Optional - anything you want to remember about this buy.")):
+            lb = ttk.Label(form, text=lbl, style="Card.TLabel"); lb.pack(side="left", padx=(8, 2))
+            e = ttk.Combobox(form, textvariable=var, width=w) if var is self.o_item else ttk.Entry(form, textvariable=var, width=w)
+            e.pack(side="left")
+            if g: tip(lb, g, app); tip(e, g, app)
+            e.bind("<Return>", lambda ev: self._log_buy())
+            if var is self.o_item: self.o_combo = e
+        self.o_item.trace_add("write", lambda *_: (self._item_values(self.o_combo, self.o_item), self._o_prefill()))
+        self.o_combo.bind("<<ComboboxSelected>>", lambda e: self._o_prefill())
+        ttk.Button(form, text="Save buy", style="Accent.TButton", command=self._log_buy).pack(side="left", padx=8)
+        self.o_preview = ttk.Label(form, text="", style="Card.TLabel"); self.o_preview.pack(side="left", padx=4)
+        for v in (self.o_qty, self.o_buy): v.trace_add("write", lambda *_: self._o_cost())
+        box = ttk.Frame(self); box.pack(fill="x", pady=(0, 4))
+        cols = [("when", "Bought", 110, str), ("name", "Item", 170, str), ("qty", "How many", 70, gp),
+                ("buy", "Bought at", 85, gp), ("cost", "Total cost", 85, short_gp), ("held", "Held for", 70, str),
+                ("live", "Sell at now", 85, gp), ("est", "Est. profit", 90, profit_fmt), ("note", "Note", 120, str)]
+        self.t_open = SortTable(box, cols, height=5, title="Open flips (bought, not sold yet)", app=app,
+                                tips={"live": "sell_at", "held": "How long since you logged the buy.",
+                                      "cost": "How many x Bought at - the gp you have tied up.",
+                                      "est": "Profit after GE tax if all of them sold at the current 'Sell at now' price."},
+                                on_double=self._sold_dialog)
+        self.t_open.pack(side="left", fill="x", expand=True)
+        self.o_empty = ttk.Label(self.t_open, text="No open flips. Log a buy above - when it sells, select it and press 'Sold…'.",
+                                 style="Muted.TLabel")
+        bf = ttk.Frame(box); bf.pack(side="left", fill="y", padx=(6, 0), pady=(24, 0))
+        b = ttk.Button(bf, text="Sold…", style="Accent.TButton", command=lambda: self._with_open(self._sold_dialog))
+        b.pack(fill="x", pady=2); tip(b, "It sold! Enter the sell price (and how many, for a partial sale). "
+                                        "It moves to your flip history below.", app)
+        ttk.Button(bf, text="Edit…", command=lambda: self._with_open(self._edit_dialog)).pack(fill="x", pady=2)
+        ttk.Button(bf, text="Delete", command=lambda: self._with_open(self._del_open)).pack(fill="x", pady=2)
+        self.o_total = ttk.Label(bf, text="", style="Muted.TLabel", justify="left"); self.o_total.pack(fill="x", pady=(6, 0))
+
+    def _o_prefill(self):
+        iid = self.app.by_name.get(self.o_item.get().strip().lower())
+        low = self._live(iid, "low")
+        if low and (not self.o_buy.get().strip() or self.o_buy.get() == self._o_auto):
+            self._o_auto = str(low); self.o_buy.set(self._o_auto)
+
+    def _o_cost(self):
+        try:
+            c = self._num(self.o_qty.get()) * self._num(self.o_buy.get())
+            self.o_preview.config(text=f"Cost: {core.fmt_gp(c)} gp")
+        except Exception:
+            self.o_preview.config(text="")
+
+    def prefill_buy(self, iid, qty=None, buy=None):
+        self.o_item.set(self.app.items.get(iid, {}).get("name", ""))
+        b = buy or self._live(iid, "low")
+        if b: self._o_auto = str(b); self.o_buy.set(self._o_auto)
+        self.o_qty.set(str(qty) if qty else "")
+
+    def _log_buy(self):
+        name = self.o_item.get().strip()
+        iid = self.app.by_name.get(name.lower())
+        if iid is None:
+            messagebox.showerror("Log a buy", f"I don't know an item called {name!r}. Pick one from the list.", parent=self); return
+        try:
+            o = self.flog.add_open(iid, self.app.items[iid]["name"], self._num(self.o_qty.get()), self._num(self.o_buy.get()),
+                                   self.o_note.get())
+        except Exception:
+            messagebox.showerror("Log a buy", "Please enter how many you bought and the price you paid each "
+                                              "(numbers like 1500, 1.5k or 2m).", parent=self); return
+        self.o_qty.set(""); self.o_note.set(""); self.render_open(); self.app.on_flips_changed()
+        self.app.status(f"Logged buy: {o['qty']:,} × {o['name']} at {core.fmt_gp(o['buy'])}. "
+                        "Press 'Sold…' when it sells.")
+
+    def _with_open(self, fn):
+        r = self.t_open.selected()
+        if r is None: self.app.status("Select an open flip in the list first."); return
+        fn(r)
+
+    def _open_form(self, title, r, fields, on_save, preview=None):
+        """Small dialog: fields = [(label, initial, tip)]; on_save(values) -> True to close."""
+        d = self.app._dialog(title)
+        f = ttk.Frame(d, padding=14); f.pack(fill="both", expand=True)
+        ttk.Label(f, text=f"{r['qty']:,} × {r['name']}", style="H2.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(f, text=f"Bought at {core.fmt_gp(r['buy'])} each · {core.ago(time.time() - r['ts'])} · "
+                          f"Sell at now: {core.fmt_gp(self._live(r['id'], 'high'))}",
+                  style="Muted.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        vars_ = []
+        for i, (lbl, init, g) in enumerate(fields):
+            v = tk.StringVar(value=init); vars_.append(v)
+            lb = ttk.Label(f, text=lbl); lb.grid(row=2 + i, column=0, sticky="w")
+            e = ttk.Entry(f, textvariable=v, width=24); e.grid(row=2 + i, column=1, padx=6, pady=3, sticky="w")
+            if g: tip(lb, g, self.app)
+            if i == 0: e.focus_set(); e.select_range(0, "end")
+        pv = ttk.Label(f, text=""); pv.grid(row=2 + len(fields), column=0, columnspan=2, sticky="w", pady=(4, 6))
+        if preview:
+            def upd(*_):
+                try: t, good = preview([v.get() for v in vars_]); pv.config(text=t, style="Pos.TLabel" if good else "Neg.TLabel")
+                except Exception: pv.config(text="", style="TLabel")
+            for v in vars_: v.trace_add("write", upd)
+            upd()
+        def save():
+            if on_save([v.get() for v in vars_], d): d.destroy()
+        bf = ttk.Frame(f); bf.grid(row=3 + len(fields), column=0, columnspan=2, sticky="e")
+        ttk.Button(bf, text="Cancel", command=d.destroy).pack(side="left", padx=4)
+        ttk.Button(bf, text="Save", style="Accent.TButton", command=save).pack(side="left")
+        d.bind("<Return>", lambda e: save())
+        return d
+
+    def _sold_dialog(self, r):
+        live = self._live(r["id"], "high")
+        def preview(v):
+            q = r["qty"] if not v[1].strip() else self._num(v[1]); sp = self._num(v[0])
+            p = core.flip_profit(q, r["buy"], sp, r["name"]); tax = core.ge_tax(sp, r["name"]) * q
+            left = f" · {r['qty'] - q:,} stay open" if 0 < q < r["qty"] else ""
+            return f"Profit after tax: {core.signed_gp(p, short=False)} gp (GE tax {core.fmt_gp(tax)}){left}", p >= 0
+        def save(v, d):
+            try:
+                q = None if not v[1].strip() else self._num(v[1])
+                self.flog.sell_open(r["oid"], self._num(v[0]), q)
+            except KeyError:
+                messagebox.showerror("Sold", "That open flip no longer exists.", parent=d); return True
+            except Exception:
+                messagebox.showerror("Sold", f"Please enter the sell price each, and how many sold (1 to {r['qty']:,}).",
+                                     parent=d); return False
+            self.render(); self.app.on_flips_changed(); self.app.status(f"Moved {r['name']} to your flip history."); return True
+        self._open_form(f"Sold - {r['name']}", r,
+                        [("Sold at (each)", str(live or ""), "Pre-filled with the current Sell at price - change it to "
+                                                             "what it actually sold for. You can type 1.2k or 3m."),
+                         ("How many sold", str(r["qty"]), "Sold only some? Enter how many - the rest stay open.")],
+                        save, preview)
+
+    def _edit_dialog(self, r):
+        def save(v, d):
+            name = v[0].strip(); iid = self.app.by_name.get(name.lower())
+            if iid is None and name.lower() != r["name"].lower():
+                messagebox.showerror("Edit open flip", f"I don't know an item called {name!r}.", parent=d); return False
+            try:
+                kw = {"qty": self._num(v[1]), "buy": self._num(v[2]), "note": v[3]}
+                if iid is not None: kw.update(id=iid, name=self.app.items[iid]["name"])
+                self.flog.edit_open(r["oid"], **kw)
+            except KeyError:
+                return True
+            except Exception:
+                messagebox.showerror("Edit open flip", "Please enter how many and the price you paid each "
+                                                       "(numbers like 1500, 1.5k or 2m).", parent=d); return False
+            self.render_open(); self.app.on_flips_changed(); return True
+        self._open_form(f"Edit open flip - {r['name']}", r,
+                        [("Item", r["name"], None), ("How many", str(r["qty"]), "qty"),
+                         ("Bought at (each)", str(r["buy"]), "You can type 1.2k or 3m."), ("Note", r.get("note", ""), None)],
+                        save)
+
+    def _del_open(self, r):
+        if not messagebox.askyesno("Delete open flip", f"Delete this open flip of {r['qty']:,} × {r['name']}?\n"
+                                   "(Use 'Sold…' instead if it sold - that keeps it in your profit history.)", parent=self):
+            return
+        try: self.flog.delete_open(r["oid"])
+        except KeyError: pass
+        self.render_open(); self.app.on_flips_changed()
+
+    def render_open(self):
+        rows = self.flog.open_rows(self.app.latest)
+        for r in rows: r["when"] = datetime.datetime.fromtimestamp(r["ts"]).strftime("%Y-%m-%d %H:%M")
+        self.t_open.set_rows(sorted(rows, key=lambda r: -r["ts"]), "est")
+        if rows: self.o_empty.place_forget()
+        else: self.o_empty.place(relx=.5, rely=.6, anchor="center")
+        est = [r["est"] for r in rows if r["est"] is not None]
+        self.o_total.config(text=f"{len(rows)} open\n{core.short_gp(self.flog.open_cost())} gp in\n"
+                                 f"est. {core.signed_gp(sum(est)) if est else '-'}" if rows else "")
 
     def prefill(self, iid, qty=None, buy=None, sell=None):
         p = self.app.latest.get(str(iid), {})
@@ -721,6 +907,7 @@ class FlipsPage(ttk.Frame):
         self.flog.delete(r["idx"]); self.render(); self.app.on_flips_changed()
 
     def render(self):
+        self.render_open()
         rows = [dict(f, idx=i, when=datetime.datetime.fromtimestamp(f["ts"]).strftime("%Y-%m-%d %H:%M"))
                 for i, f in enumerate(self.flog.flips)]
         self.t_flips.set_rows(sorted(rows, key=lambda r: -r["ts"]), "profit")
