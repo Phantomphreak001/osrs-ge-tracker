@@ -10,7 +10,7 @@ from analytics_tab import WatchlistPage, ItemPage, MarketPage, FlipsPage
 from suggestions_tab import FlipFinderPage
 from home_tab import HomePage
 
-VERSION = "0.8"
+VERSION = "0.9.0"
 TABS = (("home", "🏠 Home"), ("watchlist", "★ Watchlist"), ("finder", "💰 Flip Finder"), ("item", "🔎 Item"),
         ("market", "📈 Market"), ("flips", "📒 My Flips"))
 REFRESH_S = 60
@@ -172,7 +172,6 @@ class App:
         else: m.add_command(label="Add to watchlist", command=lambda: self.add_watch(iid))
         m.add_command(label="Set price alert…", command=lambda: self.alert_dialog(iid))
         m.add_command(label="Log a flip…", command=lambda: self.log_flip(iid))
-        m.add_command(label="Log a buy (sell later)…", command=lambda: self.log_buy(iid))
         m.add_separator()
         m.add_command(label="Copy name", command=lambda: (self.root.clipboard_clear(),
                                                          self.root.clipboard_append(self.items[iid]["name"])))
@@ -195,7 +194,7 @@ class App:
         self.home.refresh_profit()
 
     def log_flip(self, iid, qty=None, buy=None, sell=None):
-        self.flips_page.prefill(iid, qty, buy, sell); self.goto("flips")
+        self.flips_page.prefill_buy(iid, qty, buy); self.goto("flips")
 
     def log_buy(self, iid, qty=None, buy=None):
         self.flips_page.prefill_buy(iid, qty, buy); self.goto("flips")

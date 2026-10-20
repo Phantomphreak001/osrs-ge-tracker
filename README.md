@@ -11,7 +11,7 @@ A desktop Grand Exchange tracker for Old School RuneScape, built with Python and
 - **Analytics**: market movers, watchlist summary, deep-dive charts (SMAs, spread band), timing/ROI by hour of day.
 - **Suggestions**: quick flips, overnight holds and longer-term ideas.
 - **Flip log**: record your trades and see realised after-tax profit.
-- **Open flips**: log a buy now and enter the sell price when it sells (partial sales supported), with live estimated profit after tax.
+- **My Flips**: "Log a flip" with just the item, how many and the price you bought at. It waits in **Open flips** (with live estimated profit after tax) until it sells - then select it, press **Sold…** (or double-click) and enter the sold-at price to move it to your completed flips (partial sales supported).
 - **Light and dark themes.**
 
 | Item view | Flip finder |

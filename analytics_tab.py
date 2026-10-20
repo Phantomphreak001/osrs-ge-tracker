@@ -286,10 +286,8 @@ class ItemPage(ttk.Frame):
         self.btn_watch = ttk.Button(hd, text="☆ Add to watchlist", command=self._toggle_watch, width=20)
         self.btn_flip = ttk.Button(hd, text="Log a flip…", command=lambda: self.iid and app.log_flip(self.iid))
         self.btn_alert = ttk.Button(hd, text="Set alert…", command=lambda: self.iid and app.alert_dialog(self.iid))
-        self.btn_buy = ttk.Button(hd, text="Log a buy…", command=lambda: self.iid and app.log_buy(self.iid))
-        for b in (self.btn_flip, self.btn_buy, self.btn_alert, self.btn_watch): b.pack(side="right", padx=2)
-        tip(self.btn_flip, "Record a flip you did with this item (My Flips tracks your profit).", app)
-        tip(self.btn_buy, "Bought some but not sold yet? Log the buy now and enter the sell price later (My Flips → Open flips).", app)
+        for b in (self.btn_flip, self.btn_alert, self.btn_watch): b.pack(side="right", padx=2)
+        tip(self.btn_flip, "Log what you bought - it waits in My Flips → Open flips until you press 'Sold…'.", app)
         self.search = SearchBox(hd, app, lambda iid: app.open_item(iid), width=26, placeholder="open another item…")
         self.search.pack(side="right", padx=10)
         # fact cards
@@ -637,22 +635,6 @@ class FlipsPage(ttk.Frame):
         top = ttk.Frame(self); top.pack(fill="x")
         ttk.Label(top, text="My flips", style="Title.TLabel").pack(side="left")
         self.f_total = ttk.Label(top, text="", font=("Segoe UI", 11, "bold")); self.f_total.pack(side="left", padx=14)
-        form = ttk.Frame(self, style="Card.TFrame", padding=8); form.pack(fill="x", pady=6)
-        ttk.Label(form, text="Log a flip:", style="CardTitle.TLabel").pack(side="left", padx=(0, 6))
-        self.f_item, self.f_qty, self.f_buy, self.f_sell = (tk.StringVar() for _ in range(4))
-        for lbl, var, w, g in (("Item", self.f_item, 28, None), ("How many", self.f_qty, 8, "qty"),
-                               ("Bought at (each)", self.f_buy, 11, "You can type 1.2k or 3m."),
-                               ("Sold at (each)", self.f_sell, 11, "You can type 1.2k or 3m.")):
-            l = ttk.Label(form, text=lbl, style="Card.TLabel"); l.pack(side="left", padx=(8, 2))
-            e = ttk.Combobox(form, textvariable=var, width=w) if var is self.f_item else ttk.Entry(form, textvariable=var, width=w)
-            e.pack(side="left")
-            if g: tip(l, g, app); tip(e, g, app)
-            if var is self.f_item:
-                self.f_combo = e; var.trace_add("write", lambda *_: self._flip_complete())
-            e.bind("<Return>", lambda ev: self._log_flip())
-        ttk.Button(form, text="Save flip", style="Accent.TButton", command=self._log_flip).pack(side="left", padx=8)
-        self.f_preview = ttk.Label(form, text="", style="Card.TLabel"); self.f_preview.pack(side="left", padx=8)
-        for v in (self.f_qty, self.f_buy, self.f_sell): v.trace_add("write", lambda *_: self._preview())
         self._build_open()
         body = ttk.Frame(self); body.pack(fill="both", expand=True)
         cols = [("when", "When", 120, str), ("name", "Item", 170, str), ("qty", "How many", 70, gp),
@@ -676,11 +658,6 @@ class FlipsPage(ttk.Frame):
             self.fcanvas = FigureCanvasTkAgg(self.ffig, master=cf); self.fcanvas.get_tk_widget().pack(fill="both", expand=True)
         self.render()
 
-    def _flip_complete(self):
-        s = self.f_item.get().strip().lower()
-        if len(s) >= 2 and getattr(self.app, "names", None):
-            self.f_combo["values"] = [n for n in self.app.names if s in n.lower()][:30]
-
     # ---------- open flips (v0.8): log the buy now, enter the sale when it sells ----------
     def _item_values(self, combo, var):
         s = var.get().strip().lower()
@@ -694,15 +671,14 @@ class FlipsPage(ttk.Frame):
     def _build_open(self):
         app = self.app
         form = ttk.Frame(self, style="Card.TFrame", padding=8); form.pack(fill="x", pady=(0, 6))
-        l = ttk.Label(form, text="Log a buy (sell later):", style="CardTitle.TLabel"); l.pack(side="left", padx=(0, 6))
-        tip(l, "Bought something that hasn't sold yet? Log the buy now - it goes into 'Open flips' below. "
-               "When it sells, select it and press 'Sold…' to enter the sell price.", app)
-        self.o_item, self.o_qty, self.o_buy, self.o_note = (tk.StringVar() for _ in range(4))
+        l = ttk.Label(form, text="Log a flip:", style="CardTitle.TLabel"); l.pack(side="left", padx=(0, 6))
+        tip(l, "Log what you bought - it goes into 'Open flips' below. When it sells on the GE, "
+               "select it and press 'Sold…' (or double-click it) to enter the sold-at price.", app)
+        self.o_item, self.o_qty, self.o_buy = (tk.StringVar() for _ in range(3))
         self._o_auto = None
         for lbl, var, w, g in (("Item", self.o_item, 28, None), ("How many", self.o_qty, 8, "qty"),
                                ("Bought at (each)", self.o_buy, 11, "Pre-filled with the current Buy at price - change it "
-                                                                   "to what you actually paid. You can type 1.2k or 3m."),
-                               ("Note", self.o_note, 16, "Optional - anything you want to remember about this buy.")):
+                                                                   "to what you actually paid. You can type 1.2k or 3m.")):
             lb = ttk.Label(form, text=lbl, style="Card.TLabel"); lb.pack(side="left", padx=(8, 2))
             e = ttk.Combobox(form, textvariable=var, width=w) if var is self.o_item else ttk.Entry(form, textvariable=var, width=w)
             e.pack(side="left")
@@ -711,7 +687,7 @@ class FlipsPage(ttk.Frame):
             if var is self.o_item: self.o_combo = e
         self.o_item.trace_add("write", lambda *_: (self._item_values(self.o_combo, self.o_item), self._o_prefill()))
         self.o_combo.bind("<<ComboboxSelected>>", lambda e: self._o_prefill())
-        ttk.Button(form, text="Save buy", style="Accent.TButton", command=self._log_buy).pack(side="left", padx=8)
+        ttk.Button(form, text="Log flip", style="Accent.TButton", command=self._log_buy).pack(side="left", padx=8)
         self.o_preview = ttk.Label(form, text="", style="Card.TLabel"); self.o_preview.pack(side="left", padx=4)
         for v in (self.o_qty, self.o_buy): v.trace_add("write", lambda *_: self._o_cost())
         box = ttk.Frame(self); box.pack(fill="x", pady=(0, 4))
@@ -724,7 +700,7 @@ class FlipsPage(ttk.Frame):
                                       "est": "Profit after GE tax if all of them sold at the current 'Sell at now' price."},
                                 on_double=self._sold_dialog)
         self.t_open.pack(side="left", fill="x", expand=True)
-        self.o_empty = ttk.Label(self.t_open, text="No open flips. Log a buy above - when it sells, select it and press 'Sold…'.",
+        self.o_empty = ttk.Label(self.t_open, text="No open flips. Log a flip above - when it sells, select it and press 'Sold…'.",
                                  style="Muted.TLabel")
         bf = ttk.Frame(box); bf.pack(side="left", fill="y", padx=(6, 0), pady=(24, 0))
         b = ttk.Button(bf, text="Sold…", style="Accent.TButton", command=lambda: self._with_open(self._sold_dialog))
@@ -757,15 +733,14 @@ class FlipsPage(ttk.Frame):
         name = self.o_item.get().strip()
         iid = self.app.by_name.get(name.lower())
         if iid is None:
-            messagebox.showerror("Log a buy", f"I don't know an item called {name!r}. Pick one from the list.", parent=self); return
+            messagebox.showerror("Log a flip", f"I don't know an item called {name!r}. Pick one from the list.", parent=self); return
         try:
-            o = self.flog.add_open(iid, self.app.items[iid]["name"], self._num(self.o_qty.get()), self._num(self.o_buy.get()),
-                                   self.o_note.get())
+            o = self.flog.add_open(iid, self.app.items[iid]["name"], self._num(self.o_qty.get()), self._num(self.o_buy.get()))
         except Exception:
-            messagebox.showerror("Log a buy", "Please enter how many you bought and the price you paid each "
+            messagebox.showerror("Log a flip", "Please enter how many you bought and the price you paid each "
                                               "(numbers like 1500, 1.5k or 2m).", parent=self); return
-        self.o_qty.set(""); self.o_note.set(""); self.render_open(); self.app.on_flips_changed()
-        self.app.status(f"Logged buy: {o['qty']:,} × {o['name']} at {core.fmt_gp(o['buy'])}. "
+        self.o_qty.set(""); self.render_open(); self.app.on_flips_changed()
+        self.app.status(f"Logged flip: {o['qty']:,} × {o['name']} at {core.fmt_gp(o['buy'])}. "
                         "Press 'Sold…' when it sells.")
 
     def _with_open(self, fn):
@@ -865,12 +840,8 @@ class FlipsPage(ttk.Frame):
                                  f"est. {core.signed_gp(sum(est)) if est else '-'}" if rows else "")
 
     def prefill(self, iid, qty=None, buy=None, sell=None):
-        p = self.app.latest.get(str(iid), {})
-        self.f_item.set(self.app.items.get(iid, {}).get("name", ""))
-        b, s = buy or p.get("low"), sell or p.get("high")
-        if b: self.f_buy.set(str(b))
-        if s: self.f_sell.set(str(s))
-        self.f_qty.set(str(qty) if qty else "")
+        """v0.9: 'Log a flip' only takes the buy; the sell price is entered later via 'Sold…'."""
+        self.prefill_buy(iid, qty, buy)
 
     @staticmethod
     def _num(s):
@@ -878,27 +849,7 @@ class FlipsPage(ttk.Frame):
         mult = 1_000_000 if s.endswith("m") else 1000 if s.endswith("k") else 1
         return int(float(s.rstrip("mk")) * mult)
 
-    def _preview(self):
-        try:
-            p = core.flip_profit(self._num(self.f_qty.get()), self._num(self.f_buy.get()),
-                                 self._num(self.f_sell.get()), self.f_item.get().strip())
-            self.f_preview.config(text=f"Profit after tax: {core.signed_gp(p, short=False)} gp",
-                                  style="CardPos.TLabel" if p >= 0 else "CardNeg.TLabel")
-        except Exception:
-            self.f_preview.config(text="", style="Card.TLabel")
-
-    def _log_flip(self):
-        name = self.f_item.get().strip()
-        iid = self.app.by_name.get(name.lower())
-        if iid is None:
-            messagebox.showerror("Log a flip", f"I don't know an item called {name!r}. Pick one from the list.", parent=self); return
-        try:
-            self.flog.add(iid, self.app.items[iid]["name"], self._num(self.f_qty.get()),
-                          self._num(self.f_buy.get()), self._num(self.f_sell.get()))
-        except Exception:
-            messagebox.showerror("Log a flip", "Please enter how many, and the prices you bought and sold at "
-                                               "(numbers like 1500, 1.5k or 2m).", parent=self); return
-        self.f_qty.set(""); self.render(); self.app.on_flips_changed()
+    def _log_flip(self): self._log_buy()
 
     def _del_flip(self):
         r = self.t_flips.selected()
@@ -930,4 +881,4 @@ class FlipsPage(ttk.Frame):
             self.ffig.autofmt_xdate(); self.ffig.tight_layout(); theme.style_fig(self.ffig, P); self.fcanvas.draw_idle()
 
     def retheme(self):
-        self._preview(); self.render()
+        self.render()

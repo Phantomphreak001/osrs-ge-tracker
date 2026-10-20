@@ -3,7 +3,7 @@ Read-only public data. No game client interaction."""
 import json, os, re, sys, time, threading, urllib.request, urllib.parse
 
 API = "https://prices.runescape.wiki/api/v1/osrs"
-USER_AGENT = "osrs-ge-tracker/0.7 (+https://github.com/Phantomphreak001/osrs-ge-tracker)"
+USER_AGENT = "osrs-ge-tracker/0.9 (+https://github.com/Phantomphreak001/osrs-ge-tracker)"
 MIN_LATEST_INTERVAL = 60          # seconds between /latest fetches, max
 MAPPING_TTL = 24 * 3600           # re-download mapping once a day
 

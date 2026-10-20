@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0
+- Simpler My Flips: one "Log a flip" form with just Item, How many and Bought at (each), and a single "Log flip" button.
+  The "Sold at" field and the separate "Log a buy" form/button are gone (merged).
+- Logged flips go into **Open flips** (item, how many, bought at, total cost, when logged, live sell price, est. profit).
+- When it sells on the GE: select it and press "Sold…" (or double-click) and enter the sold-at price (and optionally how many
+  sold - defaults to all). It then moves to your completed flips with profit after GE tax. "Delete" (with confirm) cancels an open flip.
+- Item page / right-click menu: one "Log a flip…" action. Flip Finder's "Log as flip…" pre-fills the buy.
+- No data changes: existing `flips.json` and `open_flips.json` load as before (notes on old open flips are kept and editable).
+
 ## 0.8.0
 - Open flips: log a buy now ("Log a buy (sell later)" on My Flips, the item page, or right-click → "Log a buy…"),
   then press "Sold…" when it sells. Supports partial sales (the rest stays open), edit and delete.

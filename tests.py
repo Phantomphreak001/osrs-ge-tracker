@@ -554,6 +554,77 @@ class Live(unittest.TestCase):
                 "roi %.2f%%" % r["roi"], r["hold"], r["confidence"], "|", r["why"])
         out("\nWhip:", lat["4151"], "margin", c.margin(lat["4151"]["high"], lat["4151"]["low"]))
 
+
+class MyFlipsV09(unittest.TestCase):
+    """v0.9: 'Log a flip' = item, how many, bought at -> Open flips; 'Sold…' enters the price -> completed."""
+    def test_log_then_sold_moves_to_completed(self):
+        fl = c.FlipLog(tempfile.mkdtemp())
+        o = fl.add_open(4151, "Abyssal whip", 3, 1_500_000)
+        self.assertEqual(fl.flips, []); self.assertEqual(fl.open_cost(), 4_500_000)
+        f = fl.sell_open(o["oid"], 1_700_000)
+        self.assertEqual(fl.open, []); self.assertEqual(f["qty"], 3); self.assertEqual(f["tax"], 34_000 * 3)
+        self.assertEqual(f["profit"], (1_700_000 - 34_000 - 1_500_000) * 3)
+
+    def test_sold_tax_rules(self):
+        for name, buy, sell, tax_each in (("Cheap", 30, 49, 0), ("Edge", 40, 50, 1), ("Odd", 100, 199, 3),
+                                          ("Huge", 290_000_000, 300_000_000, 5_000_000), ("Old school bond", 8_000_000, 9_000_000, 0)):
+            fl = c.FlipLog(tempfile.mkdtemp()); o = fl.add_open(1, name, 2, buy)
+            f = fl.sell_open(o["oid"], sell)
+            self.assertEqual(f["tax"], tax_each * 2, name); self.assertEqual(f["profit"], (sell - tax_each - buy) * 2, name)
+
+    def test_existing_v08_data_still_loads(self):
+        import json, os
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "flips.json"), "w") as fh:
+            json.dump([{"ts": 1_700_000_000, "id": 2, "name": "Cannonball", "qty": 100, "buy": 200, "sell": 210, "tax": 400, "profit": 600}], fh)
+        with open(os.path.join(d, "open_flips.json"), "w") as fh:
+            json.dump({"version": 1, "open": [{"oid": "abc123", "ts": 1_700_000_100, "id": 4151, "name": "Abyssal whip",
+                                               "qty": 1, "buy": 1_500_000, "note": "old note"}]}, fh)
+        fl = c.FlipLog(d)
+        self.assertEqual(fl.total(), 600); self.assertEqual(fl.get_open("abc123")["note"], "old note")
+        fl.sell_open("abc123", 1_600_000)
+        r = c.FlipLog(d); self.assertEqual(len(r.flips), 2); self.assertEqual(r.open, [])
+        self.assertEqual(r.flips[0]["profit"], 600)                     # old completed flip untouched
+
+    def test_cancel_open_flip(self):
+        d = tempfile.mkdtemp(); fl = c.FlipLog(d); o = fl.add_open(2, "Cannonball", 10, 200)
+        fl.delete_open(o["oid"]); self.assertEqual(c.FlipLog(d).open, []); self.assertEqual(c.FlipLog(d).flips, [])
+
+    def test_ui_form_has_no_sold_at(self):
+        try:
+            import tkinter as tk
+            root = tk.Tk(); root.withdraw()
+        except Exception as e:
+            self.skipTest(f"no display: {e}")
+        try:
+            import analytics_tab as at, theme
+            class App:
+                pal = theme.PALETTES["light"] if hasattr(theme, "PALETTES") else {}
+                names = ["Abyssal whip"]; by_name = {"abyssal whip": 4151}; items = {4151: {"name": "Abyssal whip"}}
+                latest = {"4151": {"high": 1_600_000, "low": 1_500_000}}
+                def status(self, *a, **k): pass
+                def on_flips_changed(self): pass
+                def open_item(self, *a): pass
+            app = App(); app.flog = c.FlipLog(tempfile.mkdtemp())
+            try: pg = at.FlipsPage(root, app)
+            except Exception as e: self.skipTest(f"page needs full app: {e}")
+            for a in ("f_sell", "o_note", "_preview"): self.assertFalse(hasattr(pg, a), a)
+            texts = []
+            def walk(w):
+                try: texts.append(str(w.cget("text")))
+                except Exception: pass
+                for ch in w.winfo_children(): walk(ch)
+            walk(pg)
+            self.assertIn("Log flip", texts); self.assertIn("Sold…", texts)
+            self.assertFalse([t for t in texts if "Sold at" in t or "Log a buy" in t or "Save buy" in t], texts)
+            pg.prefill(4151, qty=5, sell=1_700_000)
+            self.assertEqual(pg.o_qty.get(), "5"); self.assertEqual(pg.o_buy.get(), "1500000")
+            pg._log_flip()
+            self.assertEqual(len(app.flog.open), 1); self.assertEqual(app.flog.flips, [])
+            self.assertEqual(app.flog.open[0]["qty"], 5)
+        finally:
+            root.destroy()
+
 if __name__ == "__main__":
     live = "--live" in sys.argv; sys.argv = [a for a in sys.argv if a != "--live"]
     suite = unittest.TestLoader().loadTestsFromTestCase(T)
@@ -564,5 +635,6 @@ if __name__ == "__main__":
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Suggest))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(UX))
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(OpenFlips))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(MyFlipsV09))
     if live: suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Live))
     sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
